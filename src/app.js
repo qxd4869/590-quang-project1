@@ -48,13 +48,13 @@ const onJoined = (sock) => {
     };
 
     //Add their username to the user list
-    //roomList[`room${currentRoom}`].userList[currentRoomCount] = data.name;
+    roomList[`room${currentRoom}`].userList[currentRoomCount] = data.name;
 
 
     // if there are 3 people in the room, start the game
     // and change the name of the room for the next party
     if(currentRoomCount >= 2){
-      if(currentRoomCount == 2){
+      if(currentRoomCount === 2){
         io.sockets.in(`room${currentRoom}`).emit('startRoom', {room: currentRoom});
         currentRoom++;
       }
