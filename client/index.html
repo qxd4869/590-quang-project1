@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>      
+      <style>
+        html, body {
+          width: 100%;
+          height: 100%;
+          margin: 0;
+          padding:0;
+        }
+        #mainCanvas {
+           background: #ffffff;
+           position:absolute;
+           z-index: 0;
+           left: 10px;
+           top: 10px;
+           box-shadow: 4px 4px 8px rgba(0,0,0,0.5);
+        }
+        #topCanvas{
+          background: rgba(0,0,0,0);
+          position: absolute;
+          left: 10px;
+          top: 10px;  
+          z-index: 1;	    
+        }
+        body {
+           background: #eeeeee;
+           font-family: tahoma, verdana, sans serif;
+        }
+
+        #controls {
+           position: absolute;
+            z-index: 2;
+           left: 25px;
+           top: 25px;
+        }
+        label{
+          font-size: 12px;
+          margin-right:0.75em;
+        }
+        #appPart{
+          display: none;
+        }
+      </style>
+    <script src="https://npmcdn.com/babel-core@5.8.38/browser.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="text/babel" >
+        "use strict";
+        let canvas;
+        let ctx;
+        let socket;
+        let myRoom;
+
+        //Mouse being dragged with mousedown
+        let dragging = false;
+        // GLOBALS
+        let lineWidth,strokeStyle, currentTool, fillStyle, origin, topCanvas, topCtx;
+
+
+        // CONSTANTS
+        let DEFAULT_LINE_WIDTH = 3;
+        let DEFAULT_STROKE_STYLE = "red";
+
+        //NEW CONSTANTS
+        let DEFAULT_FILL_STYLE = "blue";
+        let TOOL_PENCIL = "toolPecil";
+        let TOOL_RECTANGLE = "toolRectangle";
+        let TOOL_LINE = "toolLine";
+
+        const update = () => {
+           const data2 = {
+             room: myRoom,
+             height: canvas.height,
+             width: canvas.width,
+             imgData: canvas.toDataURL(), // get pixel data from canvas
+           };
+           socket.emit('draw', data2);
+        };
+
+        // mouse functions
+        const doMousedown = (e) => {
+            dragging = true;
+
+            // get location of mouse in canvas coordinates
+            var mouse = getMouse(e);
+
+            switch(currentTool){
+                case TOOL_PENCIL:
+                    ctx.beginPath();
+                    ctx.moveTo(mouse.x, mouse.y);
+                    break;
+
+                case TOOL_RECTANGLE:
+                case TOOL_LINE:
+                    origin.x = mouse.x;
+                    origin.y = mouse.y;
+                    break;		
+
+            }
+            
+        };
+        const doMousemove = (e) => {
+            // bail out if the mouse button is not down
+            if(!dragging) return;
+
+            //get location of mouse in canvas coordinates
+            let mouse = getMouse(e);
+            switch(currentTool) {
+                case TOOL_PENCIL:
+                    ctx.strokeStyle = strokeStyle;
+                    ctx.lineWidth = lineWidth;
+
+                    ctx.lineTo(mouse.x, mouse.y); //d raw a line to x,y of the mouse
+
+                    ctx.stroke(); //stroke the line
+                    break;
+
+                case TOOL_RECTANGLE:
+                    let x = Math.min(mouse.x, origin.x);
+                    let y = Math.min(mouse.y, origin.y);
+                    let w = Math.abs(mouse.x - origin.x);
+                    let h = Math.min(mouse.y - origin.y);
+
+                    //fill and stroke the rectangle
+                    topCtx.strokeStyle = strokeStyle;
+                    topCtx.fillStyle = fillStyle;
+                    topCtx.lineWidth = lineWidth;
+
+                    //erase old rectangle
+                    clearTopCanvas();
+
+                    // draw new rectangle
+                    topCtx.fillRect(x,y,w,h);
+                    topCtx.strokeRect(x,y,w,h);
+                    break;
+
+                case TOOL_LINE:
+                    topCtx.strokeStyle = strokeStyle;
+                    topCtx.fillStyle = fillStyle;
+                    topCtx.lineWidth = lineWidth;	
+
+                    //erase old line
+                    clearTopCanvas();
+
+                    //draw new line
+                    topCtx.beginPath();
+                    topCtx.moveTo(origin.x,origin.y);
+                    topCtx.lineTo(mouse.x,mouse.y);
+                    topCtx.stroke();
+                    break;		
+            } 
+        };
+        
+        const doMouseup = (e) => {
+          switch(currentTool){
+              case TOOL_PENCIL:
+                  ctx.closePath();
+                  break;
+              case TOOL_RECTANGLE:
+              case TOOL_LINE:
+                  if(dragging){
+                      ctx.drawImage(topCanvas,0,0);
+                      clearTopCanvas();
+                  }
+                  break;
+          }
+          dragging = false;
+        };
+
+        const doMouseout = (e) => {
+            switch(currentTool){
+                case TOOL_PENCIL:
+                    ctx.closePath();
+                    break;
+                case TOOL_RECTANGLE:
+                case TOOL_LINE:
+                    //cancel the drawing
+                    clearTopCanvas();
+                    break;
+            }
+		    dragging = false;
+        }
+        
+        // Utility for mouse
+        const getMouse = (e) => {
+            let mouse = {}
+            mouse.x = e.pageX - e.target.offsetLeft;
+            mouse.y = e.pageY - e.target.offsetTop;
+            return mouse;
+        };
+
+        const synchImage = (data) =>{
+            let image = new Image();                   
+            image.onload = () => {
+                ctx.save();
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.drawImage(image, 0, 0, data.width, data.height);
+                ctx.restore();
+            };       
+            image.src = data.imgData;
+        };
+
+        
+        //More app utility
+        const doLineWidthChange = (e) => {
+            lineWidth = e.target.value;
+        }
+        const doStrokeStyleChange = (e) => {
+            strokeStyle = e.target.value;
+        }
+
+        const clearTopCanvas = (e) =>{
+            topCtx.clearRect(0,0, topCtx.canvas.width, topCtx.canvas.height);
+        }
+
+        //App drawing diversity
+
+
+        const setupSocket = () => {           
+            socket = io.connect();
+                                                                        
+            // when someone else broadcasts a new rect to the server
+            socket.on('updateCanvas', (data) => {
+                synchImage(data);
+            });
+            
+       
+            //Not sure if I need something here yet
+            socket.emit('join', {});
+            
+            socket.on('startRoom', (data) => {
+               myRoom = data.room;
+               let appPart = document.querySelector('#appPart');
+               appPart.style.display = 'block';
+               console.dir("Second Time: "+myRoom);
+    
+            });
+          
+            setInterval(update, 20);
+
+        };
+        
+        
+        const setupDrawing = () =>{
+        // initialize some globals
+            canvas = document.querySelector('#mainCanvas');
+            ctx = canvas.getContext('2d');
+            lineWidth = DEFAULT_LINE_WIDTH;
+            strokeStyle = DEFAULT_STROKE_STYLE;
+            ctx.lineCap = "round"; // "butt",  "round", "square" (default "butt")
+            ctx.lineJoin = "round"; // "round", "bevel", "miter" (default "miter")
+
+            //initialize other globals
+            fillStyle = DEFAULT_FILL_STYLE;
+            currentTool = TOOL_PENCIL;
+            origin = {}; 
+            topCanvas = document.querySelector("#topCanvas");
+            topCtx = topCanvas.getContext('2d');
+
+            //set initial properties of both graphics context
+            topCtx.lineWidth = ctx.lineWidth = lineWidth;
+            topCtx.strokeStyle = ctx.strokeStyle = strokeStyle;
+            topCtx.fillStyle = ctx.fillStyle = fillStyle;
+            topCtx.lineCap = ctx.lineCap = "round";
+            top.lineJoin = ctx.lineJoin = "round";
+
+
+            // Hook up event listeners
+            canvas.onmousedown = doMousedown;
+            canvas.onmousemove = doMousemove;
+            canvas.onmouseup = doMouseup;
+            canvas.onmouseout = doMouseout;
+
+            //Hook up top canvas
+            // Hook up event listeners
+            topCanvas.onmousedown = doMousedown;
+            topCanvas.onmousemove = doMousemove;
+            topCanvas.onmouseup = doMouseup;
+            topCanvas.onmouseout = doMouseout;
+
+            document.querySelector("#lineWidthChooser").onchange = doLineWidthChange;
+            document.querySelector("#strokeStyleChooser").onchange = doStrokeStyleChange;
+            document.querySelector("#toolChooser").onchange = (e) => {
+                currentTool = e.target.value;
+                console.log("currentTool=" + currentTool);
+            }
+
+            document.querySelector("#fillStyleChooser").onchange = (e) => {
+                fillStyle = e.target.value;
+                console.log("currentTool=" + fillStyle);
+            }
+		
+        }
+        const init = () => {   
+            setupDrawing();
+          
+            // setup the socket
+            setupSocket();
+        };        
+        window.onload = init;    
+    </script>
+</head>
+<body>
+  <div id="appPart">
+      <canvas id="topCanvas" height="600" width="800">Get a real browser!</canvas>
+      <canvas id="mainCanvas" height="600" width="800">Please use an HTML 5 browser</canvas>
+    <div id="controls">
+          <label>Tool:
+              <select id="toolChooser">
+                  <option value="toolPencil" selected>Pencil</option>
+                  <option value="toolRectangle">Rectangle</option>
+                  <option value="toolLine">Line</option>
+              </select>
+          </label>  	
+          <label> Stroke Color:
+              <select id="strokeStyleChooser">
+                  <option value = "red" selected>red</option>
+                  <option value = "#0F0">green</option>>
+                  <option value = "blue">blue</option>>
+              </select>
+          </label>
+          <label>Line Width: 
+              <select id="lineWidthChooser">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3" selected>3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9</option>
+                  <option value="10">10</option>
+              </select>
+          </label>
+          <label> Fill Color:
+              <select id="fillStyleChooser">
+                  <option value = "red" >red</option>
+                  <option value = "#0F0">green</option>>
+                  <option value = "blue"selected>blue</option>>
+              </select>
+          </label>
+          <span><input id="clearButton" type="button" value="Clear"/></span>
+          <span><input id="exportButton" type="button" value="Export"/></span>
+      </div>
+  </div>
+</body>
+</html>
