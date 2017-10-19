@@ -7,30 +7,36 @@
           height: 100%;
           margin: 0;
           padding:0;
+          background-color: #5C5C5C;
         }
         #mainCanvas {
            background: #ffffff;
            position:absolute;
            z-index: 0;
-           left: 10px;
-           top: 10px;
+           top: 0px;
            box-shadow: 4px 4px 8px rgba(0,0,0,0.5);
         }
         #topCanvas{
           background: rgba(0,0,0,0);
           position: absolute;
-          left: 10px;
-          top: 10px;  
+          top: 0px;  
           z-index: 1;	    
         }
+        #chatPart {
+          position: absolute;
+          left: 800px;     
+          background-color: #EEEEEE;
+          font-family: monospace;
+          border-color: rgb(169, 169, 169)
+        }
         body {
-           background: #eeeeee;
+     
            font-family: tahoma, verdana, sans serif;
         }
 
         #controls {
            position: absolute;
-            z-index: 2;
+           z-index: 2;
            left: 25px;
            top: 25px;
         }
@@ -40,6 +46,19 @@
         }
         #appPart{
           display: none;
+        }
+        #loadingPart{
+          display: block;
+          margin-top: 3%;
+          padding: 0.2% 0 1% 0;
+          text-align:  center;
+          background-color: #EEEEEE;
+        }
+        .labelTitle{
+          font-size: 1em;
+        }
+        textarea{
+      background-color: #EEEEEE;    
         }
       </style>
     <script src="https://npmcdn.com/babel-core@5.8.38/browser.min.js"></script>
@@ -59,14 +78,33 @@
 
         // CONSTANTS
         let DEFAULT_LINE_WIDTH = 3;
-        let DEFAULT_STROKE_STYLE = "red";
+        let DEFAULT_STROKE_STYLE = "black";
 
         //NEW CONSTANTS
-        let DEFAULT_FILL_STYLE = "blue";
-        let TOOL_PENCIL = "toolPecil";
+        let DEFAULT_FILL_STYLE = "white";
+        let TOOL_PENCIL = "toolPencil";
         let TOOL_RECTANGLE = "toolRectangle";
         let TOOL_LINE = "toolLine";
 
+        const sendMessage = () =>{
+          const message = document.querySelector('#message');
+
+          switch(message.value)
+          {
+            case '/diceroll':
+              socket.emit('diceroll', {});      
+              break;
+            case '/datetime':
+              socket.emit('datetime', {});   
+              break;
+            case '/dance':
+              socket.emit('dance', {});   
+              break;
+            default:
+              socket.emit('msgToServer', {msg: message.value, room: myRoom});
+              break;
+          }
+        };
         const update = () => {
            const data2 = {
              room: myRoom,
@@ -164,6 +202,7 @@
                   }
                   break;
           }
+          update();
           dragging = false;
         };
 
@@ -216,28 +255,48 @@
         //App drawing diversity
 
 
-        const setupSocket = () => {           
+        const setupSocket = () => {
+            let loadingPart = document.querySelector('#loadingPart');
+            let user = document.querySelector("#username").value;
+            loginPart.innerHTML = "Waiting for the second user...";
             socket = io.connect();
-                                                                        
+          
+            const send = document.querySelector('#send');  
+            const message = document.querySelector('#message');
+            const chat = document.querySelector("#chat");
+          
+            socket.on('connect', () =>{
+              console.log('connnecting');
+
+              if(!user){
+                user = 'unknown';
+              }
+
+              socket.emit('join', {name: user });
+              send.onclick = sendMessage;
+
+
+            });
+
+            socket.on('msg', (data) =>{
+              console.log(data);
+              chat.innerHTML += data.name + ": " +data.msg + "\n";
+            });
+          
             // when someone else broadcasts a new rect to the server
             socket.on('updateCanvas', (data) => {
                 synchImage(data);
             });
             
-       
-            //Not sure if I need something here yet
-            socket.emit('join', {});
             
             socket.on('startRoom', (data) => {
+               loadingPart.style.display = 'none';
                myRoom = data.room;
                let appPart = document.querySelector('#appPart');
                appPart.style.display = 'block';
-               console.dir("Second Time: "+myRoom);
-    
+              
             });
           
-            setInterval(update, 20);
-
         };
         
         
@@ -294,17 +353,38 @@
         const init = () => {   
             setupDrawing();
           
-            // setup the socket
-            setupSocket();
+            //setup the socket
+            const connect = document.querySelector('#connect');
+            connect.addEventListener('click', setupSocket);
         };        
         window.onload = init;    
     </script>
 </head>
 <body>
+  <div id ="loadingPart">
+    <h1>Welcome to multiuser drawing app</h1>
+    <p>This is a 2-user app in which 2 users cooperate to create a master piece</p>
+    <p>Enjoy this experience!</p>
+    <div id ="loginPart">
+      <label class="labelTitle" for="user">Username:</label>
+      <input id="username" name="user" type="text"/>
+      <input id='connect' type='button' value='Join' /> <br />
+    </div>
+  </div>
   <div id="appPart">
       <canvas id="topCanvas" height="600" width="800">Get a real browser!</canvas>
       <canvas id="mainCanvas" height="600" width="800">Please use an HTML 5 browser</canvas>
-    <div id="controls">
+      <div id="chatPart">
+        <div id ="partI">
+          <label for="message">Message:</label>
+          <input id="message" name="message" type="text"/>
+          <input id="send" type="button" value="send" />
+        </div>
+        <div id="partII">
+          <textarea id="chat" rows="20" cols="40" readonly> </textarea>
+        </div>
+      </div>
+      <div id="controls">
           <label>Tool:
               <select id="toolChooser">
                   <option value="toolPencil" selected>Pencil</option>
@@ -314,9 +394,11 @@
           </label>  	
           <label> Stroke Color:
               <select id="strokeStyleChooser">
-                  <option value = "red" selected>red</option>
+                  <option value = "black" selected>black</option>
+                  <option value = "red">red</option>
                   <option value = "#0F0">green</option>>
                   <option value = "blue">blue</option>>
+                  <option value = "white">white</option>>
               </select>
           </label>
           <label>Line Width: 
@@ -335,13 +417,12 @@
           </label>
           <label> Fill Color:
               <select id="fillStyleChooser">
+                  <option value = "white"selected>white</option>>
                   <option value = "red" >red</option>
                   <option value = "#0F0">green</option>>
-                  <option value = "blue"selected>blue</option>>
+                  <option value = "blue">blue</option>>
               </select>
           </label>
-          <span><input id="clearButton" type="button" value="Clear"/></span>
-          <span><input id="exportButton" type="button" value="Export"/></span>
       </div>
   </div>
 </body>
